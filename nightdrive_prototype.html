@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#080b0d">
+<title>NIGHTDRIVE — Cyberpunk GPS</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#080b0d;--panel:#10171a;--yellow:#f7e600;--cyan:#00e5ff;--pink:#ff3cac;--muted:#8aa0a6}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#eafcff;font-family:Arial,Helvetica,sans-serif;letter-spacing:.04em}
+header{height:64px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334247;background:#080b0dee}
+.brand{font-weight:900;font-size:21px;letter-spacing:.16em;color:var(--yellow);text-shadow:0 0 12px #f7e60066}.status{font-size:10px;color:var(--cyan);letter-spacing:.12em}
+#map{height:53vh;min-height:330px;background:#10171a;filter:saturate(.8) contrast(1.1)}
+.panel{padding:14px 16px 24px;background:linear-gradient(180deg,#11191c,#080b0d)}
+.row{display:flex;gap:8px}.search{flex:1;min-width:0;background:#0a1114;border:1px solid #405158;color:white;padding:13px;border-radius:4px;font-size:14px;outline:none}
+button{border:1px solid var(--yellow);background:#f7e600;color:#080b0d;font-weight:900;padding:12px 14px;border-radius:3px;letter-spacing:.08em}
+button.secondary{background:#10171a;color:var(--cyan);border-color:var(--cyan)}button:active{transform:scale(.98)}
+.controls{display:flex;gap:8px;margin-top:10px}.controls button{flex:1;font-size:11px}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:14px}
+.stat{background:#10171a;border:1px solid #29383d;padding:11px 9px;min-width:0}
+.stat small{display:block;color:var(--muted);font-size:9px;margin-bottom:7px}.stat strong{font-size:17px;color:var(--yellow);white-space:nowrap}
+.instruction{margin-top:12px;padding:12px;border-left:3px solid var(--cyan);background:#0c171b;font-size:12px;color:#d7fbff}
+.footer{margin-top:13px;display:flex;justify-content:space-between;color:var(--muted);font-size:9px}
+.leaflet-container{background:#10171a}.leaflet-control-attribution{font-size:8px!important}
+@media(min-width:700px){#map{height:58vh}.panel{max-width:900px;margin:auto}}
+</style>
+</head>
+<body>
+<header><div class="brand">NIGHTDRIVE</div><div class="status">● SYSTEM ONLINE<br>NEON NAVIGATION / 0.1</div></header>
+<div id="map" aria-label="Hartă de navigație"></div>
+<section class="panel">
+ <div class="row">
+  <input id="destination" class="search" placeholder="Introdu destinația..." autocomplete="off">
+  <button id="go">GO</button>
+ </div>
+ <div class="controls">
+  <button class="secondary" id="locate">◎ POZIȚIA MEA</button>
+  <button class="secondary" id="voice">◖ VOCE: ON</button>
+  <button class="secondary" id="clear">RESET</button>
+ </div>
+ <div class="stats">
+  <div class="stat"><small>VITEZĂ</small><strong id="speed">-- km/h</strong></div>
+  <div class="stat"><small>DISTANȚĂ</small><strong id="distance">-- km</strong></div>
+  <div class="stat"><small>ETA</small><strong id="eta">-- min</strong></div>
+ </div>
+ <div class="instruction" id="message">Aștept localizarea GPS. Apasă „POZIȚIA MEA” pentru a începe.</div>
+ <div class="footer"><span>NIGHT CITY MODE</span><span>MAP DATA © OPENSTREETMAP</span></div>
+</section>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map=L.map('map',{zoomControl:false}).setView([50.9375,6.9603],6);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
+L.control.zoom({position:'bottomright'}).addTo(map);
+let me=null,destinationMarker=null,route=null,watch=null,voiceOn=true,lastPos=null;
+const $=id=>document.getElementById(id);
+function say(t){if(voiceOn&&'speechSynthesis'in window){speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(t);u.lang='ro-RO';u.rate=1.02;speechSynthesis.speak(u)}}
+function msg(t){$('message').textContent=t}
+function locate(){
+ if(!navigator.geolocation){msg('Browserul nu oferă acces la GPS.');return}
+ msg('Se caută semnalul GPS...');
+ if(watch!==null)navigator.geolocation.clearWatch(watch);
+ watch=navigator.geolocation.watchPosition(p=>{
+  const ll=[p.coords.latitude,p.coords.longitude],spd=p.coords.speed;
+  if(!me)me=L.circleMarker(ll,{radius:8,color:'#00e5ff',weight:3,fillColor:'#00e5ff',fillOpacity:.8}).addTo(map);
+  else me.setLatLng(ll);
+  map.setView(ll,15);
+  $('speed').textContent=spd==null?'-- km/h':Math.round(spd*3.6)+' km/h';
+  lastPos=ll;msg('GPS ACTIV • Poziția ta este actualizată.');
+ },e=>msg('GPS indisponibil: '+e.message+'. Verifică permisiunea de localizare și conexiunea HTTPS.'),{enableHighAccuracy:true,maximumAge:3000,timeout:15000});
+}
+async function search(){
+ const q=$('destination').value.trim();if(!q){msg('Introdu mai întâi o destinație.');return}
+ msg('Se caută destinația...');
+ try{
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q='+encodeURIComponent(q));
+  const a=await r.json();if(!a.length)throw Error('Destinația nu a fost găsită.');
+  const dest=[+a[0].lat,+a[0].lon];
+  if(destinationMarker)map.removeLayer(destinationMarker);
+  destinationMarker=L.marker(dest).addTo(map).bindPopup(a[0].display_name);
+  if(!lastPos){msg('Destinație găsită. Apasă POZIȚIA MEA pentru a obține poziția GPS și apoi GO din nou.');map.setView(dest,13);return}
+  const rr=await fetch(`https://router.project-osrm.org/route/v1/driving/${lastPos[1]},${lastPos[0]};${dest[1]},${dest[0]}?overview=full&geometries=geojson&steps=true`);
+  const data=await rr.json();if(data.code!=='Ok')throw Error('Nu s-a putut calcula traseul.');
+  if(route)map.removeLayer(route);
+  route=L.geoJSON(data.routes[0].geometry,{style:{color:'#f7e600',weight:6,opacity:.9}}).addTo(map);
+  map.fitBounds(route.getBounds(),{padding:[28,28]});
+  const km=data.routes[0].distance/1000,min=Math.round(data.routes[0].duration/60);
+  $('distance').textContent=km.toFixed(1)+' km';$('eta').textContent=min+' min';
+  const step=data.routes[0].legs[0].steps.find(s=>s.maneuver&&s.maneuver.type!=='depart');
+  const instruction=step?('În curând: '+(step.name||'continuă pe traseu')):'Traseu calculat. Urmează linia galbenă.';
+  msg(instruction+' • Verifică indicatoarele rutiere.');
+  say('Traseu calculat. Distanță '+km.toFixed(1)+' kilometri. Timp estimat '+min+' minute.');
+ }catch(e){msg(e.message+' Încearcă din nou.')}
+}
+$('locate').onclick=locate;$('go').onclick=search;
+$('voice').onclick=()=>{voiceOn=!voiceOn;$('voice').textContent=voiceOn?'◖ VOCE: ON':'◖ VOCE: OFF';if(!voiceOn&&'speechSynthesis'in window)speechSynthesis.cancel()};
+$('clear').onclick=()=>{if(route)map.removeLayer(route);if(destinationMarker)map.removeLayer(destinationMarker);route=destinationMarker=null;$('distance').textContent='-- km';$('eta').textContent='-- min';msg('Traseu resetat. Introdu o destinație nouă.')};
+</script>
+</body></html>
